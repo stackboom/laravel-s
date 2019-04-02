@@ -78,10 +78,25 @@ class LaravelS extends Server
 
         if ($this->enableWebSocket) {
             $eventHandler = function ($method, array $params) {
-                $this->callWithCatchException(function () use ($method, $params) {
-                    call_user_func_array([$this->getWebSocketHandler(), $method], $params);
+                return $this->callWithCatchException(function () use ($method, $params) {
+                    return call_user_func_array([$this->getWebSocketHandler(), $method], $params);
                 });
             };
+
+            if(method_exists($this->getWebSocketHandler(),'OnHandshake')){
+                $this->swoole->on('Handshake', function (\swoole_http_request $request, \swoole_http_response $response) use ($eventHandler) {
+                    if(false !== $eventHandler('OnHandshake', func_get_args())){
+                        $this->swoole->defer(function()use($request,$eventHandler){
+                            $this->laravel->resetSession();
+                            $laravelRequest = $this->convertRequest($this->laravel, $request);
+                            $this->laravel->bindRequest($laravelRequest);
+                            $this->laravel->handleDynamic($laravelRequest);
+                            $eventHandler('onOpen', [$this->swoole,$request]);
+                            $this->laravel->saveSession();
+                        });
+                    }
+                });
+            }
 
             $this->swoole->on('Open', function (WebSocketServer $server, SwooleRequest $request) use ($eventHandler) {
                 // Start Laravel's lifetime, then support session ...middleware.
